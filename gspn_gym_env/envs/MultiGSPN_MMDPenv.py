@@ -51,25 +51,36 @@ class MultiGSPN_MMDPenv(gym.Env):
         # the most efficient approach is define a set of actions that are common to every robot
         # and replicate it with different names for each robot
         self.robots_map = {}
-        self.robots_map_inv = {}
-        self.list_actions = list_actions
-        n_actions = len(list_actions) * n_robots
         m_zero = self.mr_gspn.get_sparse_marking()
-
         r_number = 0
         for pl, token in m_zero.items():
             if 'Available' not in pl and 'Global' not in pl:
-                self.robots_map[pl] = r_number
-                self.robots_map_inv[r_number] = pl
-                r_number += 1
+                for i in range(token):
+                    _, en_actions = gspn_model.get_enabled_transitions(place_name=pl)
+                    self.robots_map[r_number] = [pl, list(en_actions.keys())]
+                    r_number += 1
+
+        print('robot map')
+        print(self.robots_map)
 
         if r_number != n_robots:
             raise Exception('The provided number of robots and the number of tokens does not match.')
 
-        self.actions_map = {}
+        self.action_idx_to_name = {}
+        self.action_name_to_idx = {}
         for robot_index in range(n_robots):
             for action_index, action_name in enumerate(list_actions):
-                self.actions_map[int(robot_index*len(list_actions)+action_index)] = 'r'+str(robot_index)+'_'+action_name
+                self.action_idx_to_name[int(robot_index*len(list_actions)+action_index)] = str(robot_index)+'_'+action_name
+                self.action_name_to_idx[str(robot_index)+'_'+action_name] = int(robot_index*len(list_actions)+action_index)
+
+        print('action to name')
+        print(self.action_idx_to_name)
+        print('action to index')
+        print(self.action_name_to_idx)
+        print()
+
+        self.list_actions = list_actions
+        n_actions = len(list_actions) * n_robots
 
         self.enabled_parallel_transitions = {}
         # # {0,1,...,n_actions}
@@ -82,8 +93,8 @@ class MultiGSPN_MMDPenv(gym.Env):
     def step(self, action):
         # get disabled actions in current state
         disabled_actions_names, disabled_actions_indexes = self.get_disabled_actions()
-        print(disabled_actions_names)
-        print(disabled_actions_indexes)
+
+        ## TODO: implement function to update the robot_map based on the marking update (after firing transitions)
 
         sys.exit()
 
@@ -448,22 +459,27 @@ class MultiGSPN_MMDPenv(gym.Env):
         return int(action_name.split('_')[-1])
 
     def get_disabled_actions(self):
-        enabled_exp_transitions, enabled_imm_transitions = self.mr_gspn.get_enabled_transitions()
+        enabled_actions_names, enabled_actions_indexes = self.get_enabled_actions()
 
-        disabled_actions_indexes = list(range(self.action_space.n))
-        disabled_actions_names = list(map(self.from_index_to_action, disabled_actions_indexes))
+        disabled_actions_names = list(self.action_name_to_idx.keys())
+        for action_name in enabled_actions_names:
+            disabled_actions_names.remove(action_name)
 
-        for enabled_action in enabled_imm_transitions.keys():
-            disabled_actions_names.remove(enabled_action)
-            action_index = int(enabled_action.split('_')[-1])
-            disabled_actions_indexes.remove(action_index)
+        disabled_actions_indexes = disabled_actions_names.copy()
+        for idx, action_name in enumerate(disabled_actions_names):
+            disabled_actions_indexes[idx] = self.action_name_to_idx[action_name]
 
         return disabled_actions_names, disabled_actions_indexes
 
     def get_enabled_actions(self):
-        enabled_exp_transitions, enabled_imm_transitions = self.mr_gspn.get_enabled_transitions()
-        enabled_actions_names = list(enabled_imm_transitions.keys())
-        enabled_actions_indexes = list(map(self.from_action_to_index, enabled_actions_names))
+        enabled_actions_names = []
+        enabled_actions_indexes = []
+        for robot_id, robot_info in self.robots_map.items():
+            enabled_actions = robot_info[1]
+            for tr_name in enabled_actions:
+                action_name = str(robot_id)+'_'+tr_name
+                enabled_actions_names.append(action_name)
+                enabled_actions_indexes.append(self.action_name_to_idx[action_name])
 
         return enabled_actions_names, enabled_actions_indexes
 
