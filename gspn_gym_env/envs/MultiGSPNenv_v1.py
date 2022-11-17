@@ -1,23 +1,25 @@
 import gym
 from gym import error, spaces, utils
 from gym.utils import seeding
-import sys
 
 import numpy as np
 from gspn_lib import gspn_tools
+import sys
 
-class MultiGSPN_MMDPenv(gym.Env):
+class MultiGSPNenv_v1(gym.Env):
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, gspn_model=None, gspn_path=None, n_locations=None, n_robots=None, actions_map=None,
-                 resources_keywords=None, reward_function=None, use_expected_time=False, verbose=False, idd=None):
-        # print('Multi GSPN Gym Env')
+    def __init__(self, gspn_model=None, gspn_path=None, n_locations=None, n_robots=None, reserved_keywords=None,
+                 actions_maps=None, reward_function=None, use_expected_time=False, verbose=False, idd=None):
+        # print('Multi GSPN Gym Env V1')
         self.id = idd
         self.verbose = verbose
         self.n_robots = n_robots
         self.n_locations = n_locations
         self.use_expected_time = use_expected_time
-        self.resources_keywords = resources_keywords
+        self.actions_id_to_name = actions_maps[0]
+        self.actions_name_to_id = actions_maps[1]
+
         if not reward_function:
             raise Exception('Please select one reward function: either 1 or 2')
         self.reward_function_type = reward_function
@@ -42,65 +44,28 @@ class MultiGSPN_MMDPenv(gym.Env):
         # self.action_space = spaces.Box(low=0.0, high=1.0,
         #                                shape=(1,), dtype=np.float32)
 
-        list_actions = []
-        imm_tr = gspn_model.get_imm_transitions()
-        for action_name, action_weight in imm_tr.items():
-            if action_weight == 0:
-                list_actions.append(action_name)
+        # get number of transitions in order to get number of actions
+        # when the number of robots (tokens) is considerably bigger than the number of locations (places/transitions)
+        # the most efficient approach is to use every single transition as an individual action
+        # imm_transitions = self.mr_gspn.get_imm_transitions()
+        # actions = imm_transitions.copy()
+        # for tr_name, tr_rate in imm_transitions.items():
+        #     if tr_rate != 0:
+        #         del actions[tr_name]
 
-        # when the number of robots (tokens) is smaller than the number of locations (places/transitions)
-        # the most efficient approach is define a set of actions that are common to every robot
-        # and replicate it with different names for each robot
-        self.robots_map = {}
-        m_zero = self.mr_gspn.get_sparse_marking()
-        r_number = 0
-        for pl, token in m_zero.items():
-            valid_place = True
-            for reserved_name in resources_keywords:
-                if reserved_name in pl:
-                    valid_place = False
-            if valid_place:
-                print(pl)
-                for i in range(token):
-                    _, en_actions = gspn_model.get_enabled_transitions(place_name=pl)
-                    self.robots_map[r_number] = [pl, list(en_actions.keys())]
-                    r_number += 1
-
-        print('robot map')
-        print(self.robots_map)
-
-        if r_number != n_robots:
-            raise Exception('The provided number of robots and the number of tokens does not match.')
-
-        self.action_idx_to_name = {}
-        self.action_name_to_idx = {}
-        for robot_index in range(n_robots):
-            for action_index, action_name in enumerate(list_actions):
-                self.action_idx_to_name[int(robot_index*len(list_actions)+action_index)] = str(robot_index)+'_'+action_name
-                self.action_name_to_idx[str(robot_index)+'_'+action_name] = int(robot_index*len(list_actions)+action_index)
-
-        print('action to name')
-        print(self.action_idx_to_name)
-        print('action to index')
-        print(self.action_name_to_idx)
-        print()
-
-        self.list_actions = list_actions
-        self.n_actions = len(list_actions) * n_robots
+        n_actions = len(self.actions_id_to_name.keys())
 
         self.enabled_parallel_transitions = {}
         # # {0,1,...,n_actions}
-        self.action_space = spaces.Discrete(self.n_actions)
+        self.action_space = spaces.Discrete(n_actions)
 
-        # if n_locations != None:
-        #     all_actions = set(range(3 * self.n_locations))
-        #     self.optimal_actions = all_actions - set(3 * np.array(range(self.n_locations)))
+        if n_locations != None:
+            all_actions = set(range(3 * self.n_locations))
+            self.optimal_actions = all_actions - set(3 * np.array(range(self.n_locations)))
 
     def step(self, action):
         # get disabled actions in current state
         disabled_actions_names, disabled_actions_indexes = self.get_disabled_actions()
-
-        ## TODO: implement function to update the robot_map based on the marking update (after firing transitions)
 
         # get current state
         current_state = self.get_current_state()
@@ -108,26 +73,19 @@ class MultiGSPN_MMDPenv(gym.Env):
             print('S: ', current_state)
             print('Enabled Timed transitions : ', self.enabled_parallel_transitions)
 
-        if action >= self.n_actions:
-            raise Exception('Action not available, please select an action between 0 and '+str(self.n_actions-1))
-        elif action in disabled_actions_indexes:
+        # map input action to associated transition
+        if action in disabled_actions_indexes:
             transition = None
         else:
-            # map input action to associated transition
-            robot_id, transition = self.action_to_transition(action)
-            print(robot_id, transition)
-
+            transition = self.action_to_transition(action)
         if self.verbose:
-            print('Action: ', action)
+            print('Action: ', action, transition)
 
         if transition != None:
             # apply action
             self.mr_gspn.fire_transition(transition)
 
-            self.update_robot_map(robot_id, current_state, transition)
-
-            # print(self.get_current_state())
-
+            print()
             sys.exit()
 
             if self.reward_function_type == 2:
@@ -140,8 +98,8 @@ class MultiGSPN_MMDPenv(gym.Env):
 
             # in a MRS the fired timed transition may not correspond to the selected action
             # this is the expected time that corresponds to the selected action
-            action_expected_time = self.get_action_time(action)
-            # action_expected_time = self.get_action_time_noiseless(action)
+            # action_expected_time = self.get_action_time(action)
+            action_expected_time = self.get_action_time_noiseless(action)
             # action_expected_time = 1.0 / transition_rate
 
             if self.reward_function_type == 1:
@@ -212,60 +170,12 @@ class MultiGSPN_MMDPenv(gym.Env):
 
     def get_current_state(self):
         sparse_state = self.mr_gspn.get_current_marking(sparse_marking=True)
+        # current_state = list(sparse_state.keys())[0]
+
         return sparse_state
 
-    def update_robot_map(self, robot_id, previous_state, transition):
-        # TODO: Implement robot mapping update
-        previous_state = previous_state.copy()
-        next_state = self.get_current_state()
-        
-        previous_state_temp = previous_state.copy()
-        next_state_temp = next_state.copy()
-
-        # delete resource places, i.e. leave only the places where tokens correspond to robots
-        for place_name, _ in previous_state_temp.items():
-            for reserved_str in self.resources_keywords:
-                if reserved_str in place_name:
-                    del previous_state[place_name]
-
-        for place_name, _ in next_state_temp.items():
-            for reserved_str in self.resources_keywords:
-                if reserved_str in place_name:
-                    del next_state[place_name]
-
-        print()
-        print('prev', previous_state)
-        print('next', next_state)
-        print()
-        marking_changes = set(next_state.items()) ^ set(previous_state.items())
-        print(marking_changes)
-        prev_mark = set()
-        next_mark = set()
-        for i in marking_changes:
-            if i in set(next_state.items()):
-                next_mark.add(i)
-            else:
-                prev_mark.add(i)
-
-        print(prev_mark)
-        print(next_mark)
-        # marking_changes = set(next_state.items()) - set(previous_state.items())
-        # print(marking_changes)
-        # if new_places:
-        #     # delete robot current information
-        #     del self.robots_map[new_places[0]]
-        #     # add new information about location and available actions of the robot
-        # print(new_places)
-
-        sys.exit()
-
     def action_to_transition(self, action):
-        transition = self.action_idx_to_name[action]
-        splited_str = transition.split('_')
-        robot_id = splited_str[0]
-        transition = transition[len(robot_id)+1:]
-
-        return robot_id, transition
+        return self.actions_id_to_name[int(action)]
 
     def marking_to_state(self):
         # map dict marking to list marking
@@ -493,34 +403,23 @@ class MultiGSPN_MMDPenv(gym.Env):
 
         return true_rates
 
-    def from_index_to_action(self, action_index):
-        return '_'+str(action_index)
-
-    def from_action_to_index(self, action_name):
-        return int(action_name.split('_')[-1])
-
     def get_disabled_actions(self):
         enabled_actions_names, enabled_actions_indexes = self.get_enabled_actions()
 
-        disabled_actions_names = list(self.action_name_to_idx.keys())
-        for action_name in enabled_actions_names:
-            disabled_actions_names.remove(action_name)
-
-        disabled_actions_indexes = disabled_actions_names.copy()
-        for idx, action_name in enumerate(disabled_actions_names):
-            disabled_actions_indexes[idx] = self.action_name_to_idx[action_name]
+        disabled_actions_indexes = list(set(self.actions_id_to_name.keys()) - set(enabled_actions_indexes))
+        disabled_actions_names = list(set(self.actions_name_to_id.keys()) - set(enabled_actions_names))
 
         return disabled_actions_names, disabled_actions_indexes
 
     def get_enabled_actions(self):
-        enabled_actions_names = []
+        enabled_exp_transitions, enabled_imm_transitions = self.mr_gspn.get_enabled_transitions()
+
         enabled_actions_indexes = []
-        for robot_id, robot_info in self.robots_map.items():
-            enabled_actions = robot_info[1]
-            for tr_name in enabled_actions:
-                action_name = str(robot_id)+'_'+tr_name
-                enabled_actions_names.append(action_name)
-                enabled_actions_indexes.append(self.action_name_to_idx[action_name])
+        enabled_actions_names = []
+        for tr_name, tr_rate in enabled_imm_transitions.items():
+            if tr_rate == 0:
+                enabled_actions_names.append(tr_name)
+                enabled_actions_indexes.append(self.actions_name_to_id[tr_name])
 
         return enabled_actions_names, enabled_actions_indexes
 
@@ -529,6 +428,17 @@ class MultiGSPN_MMDPenv(gym.Env):
         transition_rate = self.mr_gspn.get_transition_rate(transition)
         action_expected_time = 1.0/transition_rate
         return action_expected_time
+
+    def get_action_time_noiseless(self, action):
+        if self.n_locations == None:
+            raise Exception('Please specify the number of locations when instantiating the environment.')
+        else:
+            if action in self.optimal_actions:
+                # 1.0/0.5
+                return 2.0
+            else:
+                # 1.0/1.0
+                return 1.0
 
     # def seed(self, seed=None):
     #     self.np_random, seed = seeding.np_random(seed)
