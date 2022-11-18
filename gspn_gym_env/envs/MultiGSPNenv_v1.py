@@ -85,26 +85,20 @@ class MultiGSPNenv_v1(gym.Env):
             # apply action
             self.mr_gspn.fire_transition(transition)
 
-            print()
-            sys.exit()
-
-            if self.reward_function_type == 2:
-                # get reward inspect 2
-                reward = self.reward_function(current_state, transition)
+            reward = self.reward_function(current_state, transition)
 
             # get execution time (until the next decision state)
             # get also the sequence of the fired transitions ['t1', 't2', ...]
             elapsed_time, fired_transitions = self.execute_actions(use_expected_time=self.use_expected_time)
+
+            print()
+            sys.exit()
 
             # in a MRS the fired timed transition may not correspond to the selected action
             # this is the expected time that corresponds to the selected action
             # action_expected_time = self.get_action_time(action)
             action_expected_time = self.get_action_time_noiseless(action)
             # action_expected_time = 1.0 / transition_rate
-
-            if self.reward_function_type == 1:
-                # get reward inspect 1
-                reward = self.reward_function(current_state, transition, fired_transitions)
 
             self.timestamp += elapsed_time
         else:
@@ -190,56 +184,8 @@ class MultiGSPNenv_v1(gym.Env):
     def reward_function(self, sparse_state=None, transition=None, fired_transitions=None):
         reward = 0.0
 
-        if self.reward_function_type == 1:
-            # robot scalability
-            tr_index = self.from_action_to_index(transition)
-            location_index = int(tr_index/3.0)
-
-            # when this condition is true it means the mrs decided to inspect
-            if location_index != tr_index/3.0:
-                reward = 10.0
-
-        # # robot scalability
-        # for action in fired_transitions:
-        #     if action == 'AllAvailable':
-        #         reward = 10.0
-
-        elif self.reward_function_type == 2:
-            # robot scalability 2
-            # (when uncommenting this make sure in the step function this comes before transition firing)
-            tr_index = self.from_action_to_index(transition)
-            location_index = int(tr_index/3.0)
-            # when this condition is true it means the mrs decided to inspect
-            if location_index != tr_index/3.0:
-                # easier for comparison reasons
-                enabled_tr_str = ''.join(self.enabled_parallel_transitions.keys())
-                # when this condition is true it means the mrs decided to inspect the left (L) panel
-                if tr_index > location_index*3+1:
-                    # this means the panel needed inspection
-                    if 'NeedsInspAgainL'+str(location_index)+'L' not in enabled_tr_str:
-                        reward = 20.0
-                    else:
-                        reward = -1.0
-                # otherwise it means the mrs decided to inspect the right (R) panel
-                else:
-                    # this means the panel needed inspection
-                    if 'NeedsInspAgainL'+str(location_index)+'R' not in enabled_tr_str:
-                        reward = 20.0
-                    else:
-                        reward = -1.0
-
-        # inspection test
-        # if 'L4' in sparse_state.keys() and transition == '_6':
-        #     reward = 10
-
-        # inspection 1
-        # if 'L4' in sparse_state.keys() and transition == '_6':
-        #     reward = 1
-        # elif 'L3' in sparse_state.keys() and transition == '_7':
-        #     reward = 1
-
-        # if 'FullL4' in sparse_state.keys() and 'FullL3' in sparse_state.keys() and transition == '_9':
-        #     reward = 1
+        if 'Insp' in transition:
+            reward = 10.0
 
         return reward
 
@@ -374,8 +320,84 @@ class MultiGSPNenv_v1(gym.Env):
 
         return execution_time, transitions_to_fire
 
+    def fire_random_switch(self, random_switch):
+        if len(random_switch) > 1:
+            s = sum(random_switch.values())
+            random_switch_id = list(random_switch.keys())
+            random_switch_prob = np.zeros(len(random_switch))
+            # normalize the associated probabilities
+            for idx, tr_info in enumerate(random_switch.items()):
+                tr_name = tr_info[0]
+                tr_weight = tr_info[1]
+                random_switch_id[idx] = tr_name
+                random_switch_prob[idx] = tr_weight / s
+
+            # Draw from all enabled immediate transitions
+            firing_transition = np.random.choice(a=random_switch_id, size=None, p=random_switch_prob)
+
+            self.mr_gspn.fire_transition(firing_transition)
+        else:
+            # Fire the only available immediate transition
+            firing_transition = list(random_switch.keys())[0]
+            self.mr_gspn.fire_transition(firing_transition)
+
+    def check_random_switch(self, enabled_imm_transitions):
+        random_switch_available = False
+        for tr_name, tr_rate in enabled_imm_transitions.items():
+            if tr_rate != 0:
+                random_switch_available = True
+                break
+        return random_switch_available
+
+    def check_enabled_action(self, enabled_imm_transitions):
+        action_enabled = False
+        for tr_name, tr_rate in enabled_imm_transitions.items():
+            if tr_rate == 0:
+                action_enabled = True
+                break
+        return action_enabled
+
+    def check_actions_state(self, enabled_imm_transitions):
+        action_enabled = False
+        random_switch_available = False
+        for tr_name, tr_rate in enabled_imm_transitions.items():
+            if tr_rate == 0:
+                action_enabled = True
+            elif tr_rate != 0:
+                random_switch_available = True
+        return action_enabled, random_switch_available
+
     def execute_actions(self, use_expected_time=False):
         enabled_timed_transitions, enabled_imm_transitions = self.mr_gspn.get_enabled_transitions()
+
+        print()
+        # print(enabled_timed_transitions)
+        print(enabled_imm_transitions)
+
+        # check if there is at least one imm transition with weight != 0 and check if there is one with weight == 0
+        enabled_actions, random_switch = self.check_actions_state(enabled_imm_transitions)
+
+        elapsed_time = 0
+        fired_transitions = []
+        while random_switch or (not enabled_actions):
+            print('random switch: ', random_switch)
+            print('actions enabled: ', enabled_actions)
+            while random_switch:
+                self.fire_random_switch(enabled_imm_transitions)
+                enabled_timed_transitions, enabled_imm_transitions = self.mr_gspn.get_enabled_transitions()
+                enabled_actions, random_switch = self.check_actions_state(enabled_imm_transitions)
+
+            while (enabled_timed_transitions and not enabled_actions):
+                action_elapsed_time, tr_fired = self.fire_timed_transitions(enabled_timed_transitions,
+                                                                            use_expected_time)
+                elapsed_time += action_elapsed_time
+                fired_transitions += tr_fired
+                enabled_timed_transitions, enabled_imm_transitions = self.mr_gspn.get_enabled_transitions()
+                enabled_actions, random_switch = self.check_actions_state(enabled_imm_transitions)
+
+            enabled_actions, random_switch = self.check_actions_state(enabled_imm_transitions)
+
+        sys.exit()
 
         elapsed_time = 0
         fired_transitions = []
@@ -384,6 +406,8 @@ class MultiGSPNenv_v1(gym.Env):
             elapsed_time += action_elapsed_time
             fired_transitions += tr_fired
             enabled_timed_transitions, enabled_imm_transitions = self.mr_gspn.get_enabled_transitions()
+
+        print(elapsed_time)
 
         return elapsed_time, fired_transitions
 
