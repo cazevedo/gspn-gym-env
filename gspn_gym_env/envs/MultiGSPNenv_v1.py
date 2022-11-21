@@ -9,8 +9,8 @@ import sys
 class MultiGSPNenv_v1(gym.Env):
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, gspn_model=None, gspn_path=None, n_locations=None, n_robots=None, reserved_keywords=None,
-                 actions_maps=None, reward_function=None, use_expected_time=False, verbose=False, idd=None):
+    def __init__(self, gspn_model=None, gspn_path=None, n_locations=None, n_robots=None, actions_maps=None,
+                 reward_function=None, use_expected_time=False, verbose=False, idd=None):
         # print('Multi GSPN Gym Env V1')
         self.id = idd
         self.verbose = verbose
@@ -39,25 +39,11 @@ class MultiGSPNenv_v1(gym.Env):
         # [max_n_tokens_in_place0, max_n_tokens_in_place1, ... max_n_tokens_in_placen]
         # we approximate this to: [n_robots, n_robots, ... nrobots]
         self.observation_space = spaces.MultiDiscrete(nvec=[n_robots]*len(self.mr_gspn.get_current_marking()))
-
-        # # [0.0...1.0]
-        # self.action_space = spaces.Box(low=0.0, high=1.0,
-        #                                shape=(1,), dtype=np.float32)
-
-        # get number of transitions in order to get number of actions
-        # when the number of robots (tokens) is considerably bigger than the number of locations (places/transitions)
-        # the most efficient approach is to use every single transition as an individual action
-        # imm_transitions = self.mr_gspn.get_imm_transitions()
-        # actions = imm_transitions.copy()
-        # for tr_name, tr_rate in imm_transitions.items():
-        #     if tr_rate != 0:
-        #         del actions[tr_name]
-
         n_actions = len(self.actions_id_to_name.keys())
+        # {0,1,...,n_actions}
+        self.action_space = spaces.Discrete(n_actions)
 
         self.enabled_parallel_transitions = {}
-        # # {0,1,...,n_actions}
-        self.action_space = spaces.Discrete(n_actions)
 
     def step(self, action):
         # get disabled actions in current state
@@ -67,7 +53,7 @@ class MultiGSPNenv_v1(gym.Env):
         current_state = self.get_current_state()
         if self.verbose:
             print('S: ', current_state)
-            print('Enabled Timed transitions : ', self.enabled_parallel_transitions)
+            # print('Enabled Timed transitions : ', self.enabled_parallel_transitions)
 
         # map input action to associated transition
         if action in disabled_actions_indexes:
@@ -81,36 +67,25 @@ class MultiGSPNenv_v1(gym.Env):
             # apply action
             self.mr_gspn.fire_transition(transition)
 
-            reward = self.reward_function(current_state, transition)
-
             # get execution time (until the next decision state)
             # get also the sequence of the fired transitions ['t1', 't2', ...]
             elapsed_time, fired_transitions = self.execute_actions(use_expected_time=self.use_expected_time)
 
+            reward = self.reward_function(current_state, transition, elapsed_time)
+
             # in a MRS the fired timed transition may not correspond to the selected action
             # this is the expected time that corresponds to the selected action
             action_expected_time = self.get_action_time(transition)
-            # action_expected_time = self.get_action_time_noiseless(action)
-            # action_expected_time = 1.0 / transition_rate
 
             self.timestamp += elapsed_time
         else:
             raise Exception('Disabled transition selected! This is not possible.')
 
-            if self.verbose:
-                print('Transition not enabled')
-            # stay in the same state, return reward -1, timestamp 0
-            # reward -1 to discourage actions that do not change the system state
-
-            reward = -1
-            # actions_info = ('action-not-available_'+str(action), -1)
-            action_expected_time = 0
-
         if self.verbose:
             print('Reward: ', reward)
             print('Timestamp: ', self.timestamp)
             print('Action expected time: ', action_expected_time)
-            print("S actions disabled: ", disabled_actions_names)
+            # print("S actions disabled: ", disabled_actions_names)
 
         # get enabled actions in the next state
         next_state_enabled_actions_names, next_state_enabled_actions_indexes = self.get_enabled_actions()
@@ -130,7 +105,6 @@ class MultiGSPNenv_v1(gym.Env):
                 'disabled_actions': (disabled_actions_names, disabled_actions_indexes),
                 'next_state_enabled_actions': (next_state_enabled_actions_names, next_state_enabled_actions_indexes),
                 'action_time': action_expected_time}
-                # 'next_state_string': next_state_string}
 
     def reset(self):
         self.timestamp = 0.0
@@ -148,18 +122,14 @@ class MultiGSPNenv_v1(gym.Env):
                                'action_time': None}
 
     def render(self, mode='human'):
-        print('rendering not implemented')
-        return True
+        raise Exception('Rendering not implemented')
 
     def close(self):
         self.reset()
         # print('Au Revoir Shoshanna!')
 
     def get_current_state(self):
-        sparse_state = self.mr_gspn.get_current_marking(sparse_marking=True)
-        # current_state = list(sparse_state.keys())[0]
-
-        return sparse_state
+        return self.mr_gspn.get_current_marking(sparse_marking=True)
 
     def action_to_transition(self, action):
         return self.actions_id_to_name[int(action)]
@@ -174,27 +144,26 @@ class MultiGSPNenv_v1(gym.Env):
 
         return state
 
-    def reward_function(self, sparse_state=None, transition=None, fired_transitions=None):
-        reward = 0.0
+    def reward_function(self, sparse_state=None, transition=None, elapsed_time=0.0):
+        if self.reward_function_type == 1:
+            reward = 0.0
 
-        if 'Insp' in transition:
-            reward = 10.0
+            if 'Insp' in transition:
+                reward += 10.0
+        else:
+            reward = 0.0
+
+            if 'Insp' in transition:
+                reward += 10.0
+
+            robots_discharged = 0
+            for local_state, robots in sparse_state.items():
+                if 'Low' in local_state:
+                    robots_discharged += robots
+
+            reward -= robots_discharged*elapsed_time
 
         return reward
-
-    def which_panels_require_inspection(self):
-        enabled_tr, _ = self.mr_gspn.get_enabled_transitions()
-
-        req_insp_actions = []
-        # self.enabled_parallel_transitions.keys()
-        for location_index in range(self.n_locations):
-            # this means the panel needed inspection
-            if 'NeedsInspAgainL' + str(location_index) + 'R' not in enabled_tr:
-                req_insp_actions.append(location_index * 3 + 1)
-            if 'NeedsInspAgainL' + str(location_index) + 'L' not in enabled_tr:
-                req_insp_actions.append(location_index*3+2)
-
-        return req_insp_actions
 
     def fire_timed_transitions(self, enabled_timed_transitions, use_expected_time):
         if use_expected_time:
@@ -289,18 +258,20 @@ class MultiGSPNenv_v1(gym.Env):
         for tr_name, tr_exp_time in self.enabled_parallel_transitions.copy().items():
             new_tr_time = list(np.array(tr_exp_time) - execution_time)
             if any(i <= 0 for i in new_tr_time):
-                # if some enabled transition has zero time remaining, fire it also
-                # according to PN formalism this should not happen
+                print(tr_name, new_tr_time)
+                # according to PN formalism there are never two timed transitions
+                # with the same elapsed time
                 # instead we should sum a very small time (e.g. 1e-6)
                 # to ensure that only 1 transition fires at each time
                 # when using expected time this arises more often
                 pruned_new_tr_time = []
                 for remaining_time in new_tr_time:
                     if remaining_time <= 0:
-                        transitions_to_fire.append(tr_name)
+                        # transitions_to_fire.append(tr_name)
+                        pruned_new_tr_time.append(1e-6)
                     else:
                         pruned_new_tr_time.append(remaining_time)
-                # pruned_new_tr_time = [i for i in new_tr_time if i > 0]
+
                 if len(pruned_new_tr_time) > 0:
                     self.enabled_parallel_transitions[tr_name] = pruned_new_tr_time
                 else:
@@ -310,7 +281,6 @@ class MultiGSPNenv_v1(gym.Env):
 
         for transition_name in transitions_to_fire:
             self.mr_gspn.fire_transition(transition_name)
-
         return execution_time, transitions_to_fire
 
     def fire_random_switch(self, random_switch):
@@ -334,22 +304,6 @@ class MultiGSPNenv_v1(gym.Env):
             firing_transition = list(random_switch.keys())[0]
 
             self.mr_gspn.fire_transition(firing_transition)
-
-    def check_random_switch(self, enabled_imm_transitions):
-        random_switch_available = False
-        for tr_name, tr_rate in enabled_imm_transitions.items():
-            if tr_rate != 0:
-                random_switch_available = True
-                break
-        return random_switch_available
-
-    def check_enabled_action(self, enabled_imm_transitions):
-        action_enabled = False
-        for tr_name, tr_rate in enabled_imm_transitions.items():
-            if tr_rate == 0:
-                action_enabled = True
-                break
-        return action_enabled
 
     def check_actions_state(self, enabled_imm_transitions):
         action_enabled = False
@@ -384,22 +338,6 @@ class MultiGSPNenv_v1(gym.Env):
                 enabled_actions, random_switch = self.check_actions_state(enabled_imm_transitions)
 
         return elapsed_time, fired_transitions
-
-    def get_action_info_attributes(self, action):
-        action_name = action[0]
-        action_number = int(action_name.split('_')[-1])
-        action_time = action[1]
-
-        return action_name, action_number, action_time
-
-    def get_rates_ground_truth(self):
-        timed_transitions = self.mr_gspn.get_timed_transitions()
-        true_rates = {}
-        for name, rate in timed_transitions.items():
-            action = int(name.split('_')[-1])
-            true_rates[action] = rate
-
-        return true_rates
 
     def get_disabled_actions(self):
         enabled_actions_names, enabled_actions_indexes = self.get_enabled_actions()
