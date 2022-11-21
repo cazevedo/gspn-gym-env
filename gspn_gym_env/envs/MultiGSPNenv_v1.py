@@ -59,10 +59,6 @@ class MultiGSPNenv_v1(gym.Env):
         # # {0,1,...,n_actions}
         self.action_space = spaces.Discrete(n_actions)
 
-        if n_locations != None:
-            all_actions = set(range(3 * self.n_locations))
-            self.optimal_actions = all_actions - set(3 * np.array(range(self.n_locations)))
-
     def step(self, action):
         # get disabled actions in current state
         disabled_actions_names, disabled_actions_indexes = self.get_disabled_actions()
@@ -91,12 +87,10 @@ class MultiGSPNenv_v1(gym.Env):
             # get also the sequence of the fired transitions ['t1', 't2', ...]
             elapsed_time, fired_transitions = self.execute_actions(use_expected_time=self.use_expected_time)
 
-            sys.exit()
-
             # in a MRS the fired timed transition may not correspond to the selected action
             # this is the expected time that corresponds to the selected action
-            # action_expected_time = self.get_action_time(action)
-            action_expected_time = self.get_action_time_noiseless(action)
+            action_expected_time = self.get_action_time(transition)
+            # action_expected_time = self.get_action_time_noiseless(action)
             # action_expected_time = 1.0 / transition_rate
 
             self.timestamp += elapsed_time
@@ -264,7 +258,7 @@ class MultiGSPNenv_v1(gym.Env):
                             sample_new_time = False
                             break
                 # sample the amount necessary such that the number of
-                # sampled times equals the smallest the place ratio
+                # sampled times equals the smallest place ratio
                 if sample_new_time and len(input_place_ratios) > 0:
                     while len(self.enabled_parallel_transitions[tr_name]) < min(input_place_ratios):
                         self.enabled_parallel_transitions[tr_name].append(np.random.exponential(scale=(1.0 / tr_rate),
@@ -427,22 +421,11 @@ class MultiGSPNenv_v1(gym.Env):
 
         return enabled_actions_names, enabled_actions_indexes
 
-    def get_action_time(self, action):
-        transition = 'Finished_'+str(action)
-        transition_rate = self.mr_gspn.get_transition_rate(transition)
+    def get_action_time(self, fired_transition):
+        associated_timed_tr = fired_transition + '_Finished'
+        transition_rate = self.mr_gspn.get_transition_rate(associated_timed_tr)
         action_expected_time = 1.0/transition_rate
         return action_expected_time
-
-    def get_action_time_noiseless(self, action):
-        if self.n_locations == None:
-            raise Exception('Please specify the number of locations when instantiating the environment.')
-        else:
-            if action in self.optimal_actions:
-                # 1.0/0.5
-                return 2.0
-            else:
-                # 1.0/1.0
-                return 1.0
 
     # def seed(self, seed=None):
     #     self.np_random, seed = seeding.np_random(seed)
