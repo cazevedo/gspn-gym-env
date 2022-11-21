@@ -91,7 +91,6 @@ class MultiGSPNenv_v1(gym.Env):
             # get also the sequence of the fired transitions ['t1', 't2', ...]
             elapsed_time, fired_transitions = self.execute_actions(use_expected_time=self.use_expected_time)
 
-            print()
             sys.exit()
 
             # in a MRS the fired timed transition may not correspond to the selected action
@@ -339,6 +338,7 @@ class MultiGSPNenv_v1(gym.Env):
         else:
             # Fire the only available immediate transition
             firing_transition = list(random_switch.keys())[0]
+
             self.mr_gspn.fire_transition(firing_transition)
 
     def check_random_switch(self, enabled_imm_transitions):
@@ -370,44 +370,24 @@ class MultiGSPNenv_v1(gym.Env):
     def execute_actions(self, use_expected_time=False):
         enabled_timed_transitions, enabled_imm_transitions = self.mr_gspn.get_enabled_transitions()
 
-        print()
-        # print(enabled_timed_transitions)
-        print(enabled_imm_transitions)
-
         # check if there is at least one imm transition with weight != 0 and check if there is one with weight == 0
         enabled_actions, random_switch = self.check_actions_state(enabled_imm_transitions)
 
         elapsed_time = 0
         fired_transitions = []
         while random_switch or (not enabled_actions):
-            print('random switch: ', random_switch)
-            print('actions enabled: ', enabled_actions)
             while random_switch:
                 self.fire_random_switch(enabled_imm_transitions)
                 enabled_timed_transitions, enabled_imm_transitions = self.mr_gspn.get_enabled_transitions()
                 enabled_actions, random_switch = self.check_actions_state(enabled_imm_transitions)
 
-            while (enabled_timed_transitions and not enabled_actions):
+            while (enabled_timed_transitions and not enabled_actions and not random_switch):
                 action_elapsed_time, tr_fired = self.fire_timed_transitions(enabled_timed_transitions,
                                                                             use_expected_time)
                 elapsed_time += action_elapsed_time
                 fired_transitions += tr_fired
                 enabled_timed_transitions, enabled_imm_transitions = self.mr_gspn.get_enabled_transitions()
                 enabled_actions, random_switch = self.check_actions_state(enabled_imm_transitions)
-
-            enabled_actions, random_switch = self.check_actions_state(enabled_imm_transitions)
-
-        sys.exit()
-
-        elapsed_time = 0
-        fired_transitions = []
-        while(enabled_timed_transitions and not enabled_imm_transitions):
-            action_elapsed_time, tr_fired = self.fire_timed_transitions(enabled_timed_transitions, use_expected_time)
-            elapsed_time += action_elapsed_time
-            fired_transitions += tr_fired
-            enabled_timed_transitions, enabled_imm_transitions = self.mr_gspn.get_enabled_transitions()
-
-        print(elapsed_time)
 
         return elapsed_time, fired_transitions
 
