@@ -11,7 +11,7 @@ class MultiGSPNenv_v1(gym.Env):
 
     def __init__(self, gspn_model=None, gspn_path=None, n_locations=None, n_robots=None, actions_maps=None,
                  reward_function=None, use_expected_time=False, verbose=False, idd=None):
-        # print('Multi GSPN Gym Env V1')
+        print('Multi GSPN Gym Env V1')
         self.id = idd
         self.verbose = verbose
         self.n_robots = n_robots
@@ -95,7 +95,7 @@ class MultiGSPNenv_v1(gym.Env):
         # next_state_string = self.get_current_state()
         if self.verbose:
             print("S': ", self.get_current_state())
-            print("S' available actions: ", next_state_enabled_actions_names)
+            print("Available actions in s': ", next_state_enabled_actions_names)
             print()
 
         episode_done = False
@@ -258,7 +258,6 @@ class MultiGSPNenv_v1(gym.Env):
         for tr_name, tr_exp_time in self.enabled_parallel_transitions.copy().items():
             new_tr_time = list(np.array(tr_exp_time) - execution_time)
             if any(i <= 0 for i in new_tr_time):
-                print(tr_name, new_tr_time)
                 # according to PN formalism there are never two timed transitions
                 # with the same elapsed time
                 # instead we should sum a very small time (e.g. 1e-6)
