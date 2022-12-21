@@ -151,6 +151,15 @@ class MultiGSPNenv_v1(gym.Env):
 
             if 'Insp' in transition:
                 reward += 10.0
+
+        elif self.reward_function_type == 2:
+            reward = 0.0
+
+            if 'Insp' in transition:
+                reward += 10.0
+            transition = transition.split('_')[-1]
+            if transition == 'Charge':
+                reward += 10.0
         else:
             reward = 0.0
 
