@@ -305,13 +305,11 @@ class MultiGSPNenv_v1(gym.Env):
 
             # Draw from all enabled immediate transitions
             firing_transition = np.random.choice(a=random_switch_id, size=None, p=random_switch_prob)
-
-            self.mr_gspn.fire_transition(firing_transition)
         else:
             # Fire the only available immediate transition
             firing_transition = list(random_switch.keys())[0]
 
-            self.mr_gspn.fire_transition(firing_transition)
+        self.mr_gspn.fire_transition(firing_transition)
 
     def check_actions_state(self, enabled_imm_transitions):
         action_enabled = False
