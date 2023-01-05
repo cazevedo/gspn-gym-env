@@ -156,9 +156,9 @@ class MultiGSPNenv_v1(gym.Env):
             reward = 0.0
 
             if 'Insp' in transition:
-                reward += 10.0
+                reward += 500.0
             elif ('Charge' in transition) and (not ('Mobile' in transition)):
-                reward += 5.0
+                reward += 100.0
         else:
             reward = 0.0
 
