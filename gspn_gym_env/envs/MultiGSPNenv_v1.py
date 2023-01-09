@@ -105,7 +105,8 @@ class MultiGSPNenv_v1(gym.Env):
                 'disabled_actions': (disabled_actions_names, disabled_actions_indexes),
                 'next_state_enabled_actions': (next_state_enabled_actions_names, next_state_enabled_actions_indexes),
                 'action_time': action_expected_time,
-                'fired_transitions': fired_transitions}
+                'fired_transitions': fired_transitions,
+                'action_to_transition': transition}
 
     def reset(self):
         self.timestamp = 0.0
